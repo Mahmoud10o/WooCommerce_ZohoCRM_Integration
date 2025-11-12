@@ -208,7 +208,43 @@ This file contains all your API credentials and settings.
 
 ### Part A: WooCommerce API Credentials
 
-> (No changes here — follow the same steps in your existing README to generate Woocommerce consumer keys and test the API.)
+Step 1: Access WooCommerce Settings
+
+Open your local WordPress site (e.g., http://mystore.local/wp-admin)
+Login with your admin credentials
+Go to: WooCommerce → Settings → Advanced → REST API
+
+Step 2: Generate API Keys
+
+Click "Add Key" button
+Fill in the form:
+
+Description: Integration Service (or any name)
+User: Select your admin user
+Permissions: Select Read/Write
+
+
+Click "Generate API Key"
+IMPORTANT: Copy the Consumer Key and Consumer Secret immediately!
+
+They look like:
+
+Consumer Key: ck_1234567890abcdef1234567890abcdef12345678
+Consumer Secret: cs_1234567890abcdef1234567890abcdef12345678
+
+
+You can only see these once!
+
+
+
+Step 3: Test WooCommerce API
+Using curl (command line):
+```bash
+ -u "ck_YOUR_KEY:cs_YOUR_SECRET" http://yoursite.local/wp-json/wc/v3/orders
+```
+
+Using browser: Visit http://yoursite.local/wp-json/wc/v3 to see available endpoints.
+You should get a JSON response with order data (or empty array if no orders yet).
 
 ---
 
