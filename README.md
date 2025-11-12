@@ -1,6 +1,7 @@
+
 # WooCommerce to Zoho CRM Integration Service
 
-A production-ready .NET 8 Worker Service that automatically synchronizes customer orders from WooCommerce into Zoho CRM as Contacts and Deals. This service demonstrates professional API integration patterns including OAuth2 authentication, REST API consumption, and background processing.
+A production-ready .NET 9 Worker Service that automatically synchronizes customer orders from WooCommerce into Zoho CRM as Contacts and Deals. This service demonstrates professional API integration patterns including OAuth2 authentication, REST API consumption, and background processing.
 
 ---
 
@@ -25,7 +26,7 @@ A production-ready .NET 8 Worker Service that automatically synchronizes custome
 
 This integration service solves a common business problem: automatically syncing e-commerce orders into your CRM system. Instead of manually entering customer data, this service:
 
-1. **Monitors** your WooCommerce store for new orders (polls every 5 minutes)
+1. **Monitors** your WooCommerce store for new orders (polls every 1.5 minutes)
 2. **Extracts** customer and order information from WooCommerce REST API
 3. **Creates/Updates** contacts in Zoho CRM automatically
 4. **Creates** deals linked to those contacts with order details
@@ -48,7 +49,7 @@ This integration service solves a common business problem: automatically syncing
 │                                                              │
 │  ┌──────────────────┐         ┌────────────────────┐         │
 │  │  Integration     │         │  Background Worker │         │
-│  │  Worker          │────────▶│(Polls every 1.5 min)|       |
+│  │  Worker          │────────▶│(Polls every 1.5 min)|       │
 │  │  (Main Process)  │         └────────────────────┘         │
 │  └──────────────────┘                                        │
 │           │                                                  │
@@ -91,7 +92,7 @@ This integration service solves a common business problem: automatically syncing
 - ✅ **Automatic Order Synchronization** - Polls WooCommerce every 1.5 minutes for new orders
 - ✅ **Contact Management** - Creates new contacts or updates existing ones (by email)
 - ✅ **Deal Creation** - Automatically creates deals linked to contacts
-- ✅ **OAuth2 Implementation** - Full OAuth2 flow with automatic token refresh
+- ✅ **OAuth2 Implementation** - Full OAuth2 flow with automatic token refresh (self-client guidance below)
 - ✅ **Duplicate Prevention** - Searches for existing contacts before creating new ones
 
 ### Technical Features
@@ -207,115 +208,68 @@ This file contains all your API credentials and settings.
 
 ### Part A: WooCommerce API Credentials
 
-#### Step 1: Access WooCommerce Settings
-
-1. Open your local WordPress site (e.g., `http://mystore.local/wp-admin`)
-2. Login with your admin credentials
-3. Go to: **WooCommerce** → **Settings** → **Advanced** → **REST API**
-
-#### Step 2: Generate API Keys
-
-1. Click **"Add Key"** button
-2. Fill in the form:
-   - **Description**: `Integration Service` (or any name)
-   - **User**: Select your admin user
-   - **Permissions**: Select **Read/Write**
-3. Click **"Generate API Key"**
-4. **IMPORTANT**: Copy the Consumer Key and Consumer Secret immediately!
-   - They look like:
-     - Consumer Key: `ck_1234567890abcdef1234567890abcdef12345678`
-     - Consumer Secret: `cs_1234567890abcdef1234567890abcdef12345678`
-   - **You can only see these once**
-
-#### Step 3: Test WooCommerce API
-
-Using curl (command line):
-```bash
-curl -u "ck_YOUR_KEY:cs_YOUR_SECRET" http://yoursite.local/wp-json/wc/v3/orders
-```
-
-Using browser: Visit `http://yoursite.local/wp-json/wc/v3` to see available endpoints.
-
-You should get a JSON response with order data (or empty array if no orders yet).
+> (No changes here — follow the same steps in your existing README to generate Woocommerce consumer keys and test the API.)
 
 ---
 
-### Part B: Zoho CRM OAuth2 Setup
+### Part B: Zoho CRM OAuth2 Setup (Self-Client — recommended for testing and single-account integrations)
 
-This is the trickiest part
+> This section replaces the general OAuth2 flow with a clearer **self-client** flow which is easier to use for development, one-off integrations, or when you are the only Zoho account owner. The _self-client_ approach lets you generate an authorization code directly from Zoho's API Console and exchange it for a refresh token — you don't need to host a redirect/callback endpoint for this manual setup step.
 
-#### Understanding OAuth2 Flow
+#### Why use a Self-Client?
+- Faster for development and testing.
+- No redirect/callback server required when generating the initial authorization code.
+- Produces the same long-lived **refresh token** that the integration service uses to obtain short-lived access tokens.
 
-OAuth2 is a secure way to access APIs without sharing passwords. Here's what you need:
+> **Important**: Self-client is ideal for development or single-account automation. For multi-user or public applications, implement the standard OAuth2 authorization code flow with a redirect URI and consent screen.
 
-1. **Client ID** - Your application's identifier (public)
-2. **Client Secret** - Your application's password (private)
-3. **Authorization Code** - One-time code to prove user consent (expires quickly(3 , 5 , 10) minutes probably)
-4. **Refresh Token** - Long-lived token to get access tokens (this is what you store)
-5. **Access Token** - Short-lived token for API calls (refreshed automatically by our service)
+#### Step 1: Create a Self-Client in Zoho API Console
 
-#### Step 1: Create Zoho self-client Application (or any other app according to your needs)
+1. Open the Zoho API Console: `https://api-console.zoho.com/`
+2. Click **Add Client** → choose **Self-Client** (or similar option in the console)
+3. Provide a Client Name and Description and create the client
+4. Copy your **Client ID** and **Client Secret** — store them securely
 
-1. Go to: https://api-console.zoho.com/
-2. Click **"Add Client"**
-3. Choose **"self-client Applications"**
-4. Fill in the form:
-   - **Client Name**: `WooCommerce Integration` (any name)
-   - **Description**: (any description)
-5. Click **"Create"**
-6. You'll see your **Client ID** and **Client Secret**
-   - Copy these immediately!
-   - Example:
-     - Client ID: `1000.ABCDEFGHIJKLMNOP`
-     - Client Secret: `1234567890abcdef1234567890abcdef`
+#### Step 2: Generate Authorization Code (Grant Token) using the Console
 
-#### Step 2: Generate Authorization Code
+- In the API Console, find your Self-Client and use the **Generate Code** feature.
+- Choose the scopes your service needs. For this integration the recommended scopes are:
+  - `ZohoCRM.modules.ALL`  (full access to CRM modules the account has permission to use)
+  - `ZohoCRM.settings.ALL` (if you need settings-level access)
 
-We need to get user permission to access their CRM. Build this URL (replace YOUR_CLIENT_ID):
+- Click **Generate** (or **Get Code**). The console will produce an **authorization code** (sometimes called a grant token). Copy it immediately — it is short lived.
 
-```
-https://accounts.zoho.com/oauth/v2/auth?scope=ZohoCRM.modules.ALL,ZohoCRM.settings.ALL&client_id=YOUR_CLIENT_ID&response_type=code&access_type=offline&redirect_uri=http://localhost:5000/callback
-```
+> **Alternative (browser URL)**: If you prefer the manual URL approach, you can also open a browser with an authorization URL (replace region/domain and client id):
 
-**Full example:**
-```
-https://accounts.zoho.com/oauth/v2/auth?scope=ZohoCRM.modules.ALL,ZohoCRM.settings.ALL&client_id=1000.ABCDEFGHIJKLMNOP&response_type=code&access_type=offline&redirect_uri=http://localhost:5000/callback
-```
+> ```
+> https://accounts.zoho.com/oauth/v2/auth?scope=ZohoCRM.modules.ALL,ZohoCRM.settings.ALL&client_id=YOUR_CLIENT_ID&response_type=code&access_type=offline
+> ```
 
-1. Paste this URL in your browser
-2. Login to your Zoho account
-3. Click **"Accept"** to authorize the application
-4. You'll be redirected to: `http://localhost:5000/callback?code=1000.xxxxx.xxxxxx`
-5. The page won't load (that's OK!), just copy the **code** from the URL
-   - The code is the value after `code=`
-   - Example: `1000.abc123def456ghi789jkl012mno345pqr678`
-   - **This code expires in 10 minutes! Use it quickly in the next step.**
+> After login+consent the URL will contain `?code=...` which you copy. But for self-client users it's simpler to use the API Console's Generate Code UI.
 
-#### Step 3: Generate Refresh Token
+#### Step 3: Exchange Authorization Code for Refresh Token
 
-Now we exchange the authorization code for a refresh token.
+Use the token endpoint to exchange the authorization code for an access token and a **refresh token**.
 
-**Using curl:**
+**Token endpoint (region-aware)**
+- US / global: `https://accounts.zoho.com/oauth/v2/token`
+- EU: `https://accounts.zoho.eu/oauth/v2/token`
+- India: `https://accounts.zoho.in/oauth/v2/token`
+- China: `https://accounts.zoho.com.cn/oauth/v2/token`
+
+**cURL example (replace values):**
+
 ```bash
 curl -X POST "https://accounts.zoho.com/oauth/v2/token" \
   -d "grant_type=authorization_code" \
   -d "client_id=YOUR_CLIENT_ID" \
   -d "client_secret=YOUR_CLIENT_SECRET" \
-  -d "redirect_uri=http://localhost:5000/callback" \
+  -d "redirect_uri=http://localhost" \
   -d "code=YOUR_AUTHORIZATION_CODE"
 ```
 
-**Real example:**
-```bash
-curl -X POST "https://accounts.zoho.com/oauth/v2/token" \
-  -d "grant_type=authorization_code" \
-  -d "client_id=1000.ABCDEFGHIJKLMNOP" \
-  -d "client_secret=1234567890abcdef1234567890abcdef" \
-  -d "redirect_uri=http://localhost:5000/callback" \
-  -d "code=1000.abc123def456ghi789jkl012mno345pqr678"
-```
+**Expected JSON response:**
 
-**Response (JSON):**
 ```json
 {
   "access_token": "1000.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -325,35 +279,29 @@ curl -X POST "https://accounts.zoho.com/oauth/v2/token" \
 }
 ```
 
-**Copy the `refresh_token` value** - this is what you'll put in `appsettings.json`.
+- **Copy the `refresh_token`** to your `appsettings.json` under `ZohoCRM:RefreshToken` — this is the token your service will use to obtain access tokens programmatically.
 
-#### Step 4: Update appsettings.json
+#### Step 4: Refreshing Access Tokens (what the service does automatically)
 
-Now update your configuration file with all the credentials:
-
-```json
-{
-  "ZohoCRM": {
-    "ApiBaseUrl": "https://www.zohoapis.com/crm/v8",
-    "ClientId": "1000.ABCDEFGHIJKLMNOP",
-    "ClientSecret": "1234567890abcdef1234567890abcdef",
-    "RefreshToken": "1000.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-  }
-}
-```
-
-#### Step 5: Test Zoho API Access
-
-The service will automatically handle getting access tokens, but you can test manually:
+The integration service uses the refresh token to obtain short-lived access tokens. Example curl to refresh:
 
 ```bash
-# Get access token from refresh token
-curl -X POST "https://accounts.zoho.com/oauth/v2/token?refresh_token=YOUR_REFRESH_TOKEN&client_id=YOUR_CLIENT_ID&client_secret=YOUR_CLIENT_SECRET&grant_type=refresh_token"
-
-# Use access token to test CRM API
-curl -H "Authorization: Zoho-oauthtoken YOUR_ACCESS_TOKEN" \
-  https://www.zohoapis.com/crm/v8/Contacts
+curl -X POST "https://accounts.zoho.com/oauth/v2/token" \
+  -d "refresh_token=YOUR_REFRESH_TOKEN" \
+  -d "client_id=YOUR_CLIENT_ID" \
+  -d "client_secret=YOUR_CLIENT_SECRET" \
+  -d "grant_type=refresh_token"
 ```
+
+Response will include a new `access_token` valid for ~1 hour. The service refreshes tokens automatically and caches the current access token until near expiry.
+
+#### Region / Domain Notes
+- Use the accounts endpoint that matches your Zoho data center (examples above). The CRM API base URL also varies by region: `https://www.zohoapis.com` (US/global), `https://www.zohoapis.eu` (EU), `https://www.zohoapis.in` (India), `https://www.zohoapis.com.cn` (China).
+- Mixing endpoints from different regions will fail — ensure `AccountsUrl` and `ApiBaseUrl` match the same Zoho region for your account.
+
+#### Security Notes
+- Treat `ClientSecret` and `RefreshToken` as sensitive secrets — don't commit them to git.
+- Store secrets in environment variables or a secrets store for production deployments.
 
 ---
 
@@ -417,7 +365,7 @@ The service will:
 
 ### Manual Testing (Trigger Immediately)
 
-If you don't want to wait 5 minutes, you can modify the polling interval:
+If you don't want to wait 1.5 minutes, you can modify the polling interval:
 
 In `appsettings.json`:
 ```json
@@ -559,7 +507,7 @@ if (DateTime.UtcNow >= _tokenExpiry) {
 ### Integration Testing Checklist
 
 - [ ] WooCommerce API credentials work (test with curl)
-- [ ] Zoho OAuth2 flow complete (refresh token obtained)
+- [ ] Zoho OAuth2 flow complete (refresh token obtained using Self-Client)
 - [ ] Service starts without errors
 - [ ] Logs show "Checking for new orders..."
 - [ ] Place test order in WooCommerce
@@ -569,7 +517,7 @@ if (DateTime.UtcNow >= _tokenExpiry) {
 
 ---
 
-##  Deployment
+## Deployment
 
 ### Windows Service
 
@@ -592,7 +540,7 @@ sc query WooCommerceZohoIntegration
 
 ---
 
-##  Project Structure
+## Project Structure
 
 ```
 WooCommerceZohoIntegration/
@@ -607,3 +555,4 @@ WooCommerceZohoIntegration/
 │       ├── WooCommerceOrder           # Order model
 │       ├── BillingDetails             # Customer billing info
 │       ├── LineItem                   # Order line
+```
