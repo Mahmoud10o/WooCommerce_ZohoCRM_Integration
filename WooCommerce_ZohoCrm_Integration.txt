@@ -1,179 +1,103 @@
-string standalone.WooCommerceOrderSync(String requestbody,Map crmAPIRequest)
+string standalone.WooCommerceOrderSync(Map crmAPIRequest)
 {
-debugOut = Map();
 try 
 {
-	woocommerce_secret = zoho.crm.getOrgVariable("WOO_WEBHOOK_SECRET");
-	crmReqMap = crmAPIRequest;
-	rawBody = "";
-	if(crmReqMap.containsKey("body") && crmReqMap.get("body") != null)
-	{
-		rawBody = crmReqMap.get("body").toString();
-	}
-	else
-	{
-		if(requestbody != null)
-		{
-			rawBody = requestbody.toString();
-		}
-		else
-		{
-			rawBody = "";
-		}
-	}
-	// extract headers map
-	headersMap = Map();
-	if(crmReqMap.containsKey("headers") && crmReqMap.get("headers") != null)
-	{
-		headersMap = crmReqMap.get("headers").toMap();
-	}
-	// extract X-WC-Webhook-Signature (header value may be an array)
-	signatureHeader = "";
-	if(headersMap != null)
-	{
-		for each  hKey in headersMap.keys()
-		{
-			if(hKey != null && hKey.toString().toLowerCase() == "x-wc-webhook-signature")
-			{
-				rawVal = headersMap.get(hKey);
-				// header value could be list/array
-				try 
-				{
-					if(rawVal != null && rawVal.size() > 0)
-					{
-						signatureHeader = rawVal.get(0).toString();
-					}
-					else
-					{
-						signatureHeader = rawVal.toString();
-					}
-				}
-				catch (arrEx)
-				{
-					signatureHeader = rawVal.toString();
-				}
-				break;
-			}
-		}
-	}
-	debugOut.put("received_signature_header",signatureHeader);
-	debugOut.put("raw_body_length",rawBody.length());
-	debugOut.put("woocommerce_secret_available",woocommerce_secret != null);
-	if(signatureHeader == null || signatureHeader == "")
-	{
-		debugOut.put("error","Missing X-WC-Webhook-Signature header");
-		debugOut.put("headers_received",headersMap);
-		info "{\"status\":\"error\",\"message\":\"Missing X-WC-Webhook-Signature header\",\"debug\":" + debugOut.toString() + "}";
-		return "Unkown Webhook";
-	}
-	if(woocommerce_secret == null)
-	{
-		woocommerce_secret = "";
-	}
+	rawBody = crmAPIRequest.get("body");
 	if(rawBody == null)
 	{
-		rawBody = "";
+		return "No request Body";
 	}
-	// try HMAC in two orders and capture exceptions
-	computedSig1 = "";
-	computedSig2 = "";
+	headersMap = crmAPIRequest.get("headers");
+	if(headersMap == null)
+	{
+		return "Can't verify this webhook";
+	}
+	signatureHeader = "";
+	xWcSigList = headersMap.get("x-wc-webhook-signature");
+	if(xWcSigList != null)
+	{
+		try 
+		{
+			signatureHeader = xWcSigList.get(0);
+		}
+		catch (e)
+		{
+			signatureHeader = xWcSigList.toString();
+		}
+	}
+	if(signatureHeader == "")
+	{
+		info "Missing webhook signature";
+		return "No webhook secret signature";
+	}
+	woocommerce_secret = zoho.crm.getOrgVariable("WOO_WEBHOOK_SECRET");
+	signatureValid = false;
 	try 
 	{
-		computedSig1 = zoho.encryption.hmacsha256(woocommerce_secret.toString(),rawBody.toString());
+		computed1 = zoho.encryption.hmacsha256(woocommerce_secret,rawBody);
+		computed2 = zoho.encryption.hmacsha256(rawBody,woocommerce_secret);
+		if(computed1 == signatureHeader || computed2 == signatureHeader)
+		{
+			signatureValid = true;
+		}
 	}
-	catch (h1)
+	catch (e)
 	{
-		computedSig1 = "ERROR: " + h1.toString();
+		info "Signature error: " + e.toString();
 	}
-	try 
+	if(!signatureValid)
 	{
-		computedSig2 = zoho.encryption.hmacsha256(rawBody.toString(),woocommerce_secret.toString());
+		info "Invalid signature";
+		return "Invalid signature";
 	}
-	catch (h2)
-	{
-		computedSig2 = "ERROR: " + h2.toString();
-	}
-	debugOut.put("computed_signature_key_message",computedSig1);
-	debugOut.put("computed_signature_message_key",computedSig2);
-	if(computedSig1 == signatureHeader || computedSig2 == signatureHeader)
-	{
-		debugOut.put("signature_match","true");
-	}
-	else
-	{
-		debugOut.put("signature_match","false");
-		debugOut.put("error","Invalid signature");
-		debugOut.put("received_sig",signatureHeader);
-		return "{\"status\":\"error\",\"message\":\"Invalid signature\",\"debug\":" + debugOut.toString() + "}";
-	}
-}
-catch (sigEx)
-{
-	debugOut.put("error","Signature check exception: " + sigEx.toString());
-	return "{\"status\":\"error\",\"message\":\"Signature check exception: " + sigEx.toString() + "\",\"debug\":" + debugOut.toString() + "}";
-}
-// ---------- END SIGNATURE VERIFICATION ----------
-// ---------- PROCESS ORDER & CRM INTERACTIONS ----------
-try 
-{
-	debugOut.put("parsing_raw_body","started");
+	//extract order data
 	orderData = rawBody.toMap();
-	debugOut.put("order_parsed_summary",{"id":orderData.get("id"),"number":orderData.get("number"),"total":orderData.get("total")});
 	billing = orderData.get("billing");
 	if(billing == null)
 	{
-		debugOut.put("error","No billing information found");
-		return "{\"status\":\"error\",\"message\":\"No billing information found\",\"debug\":" + debugOut.toString() + "}";
+		info "No billing data";
+		return "No billing data";
+	}
+	email = billing.get("email");
+	if(email == null || email.trim() == "")
+	{
+		info "Email required";
+		return "Email required";
 	}
 	firstName = billing.get("first_name");
 	lastName = billing.get("last_name");
-	email = billing.get("email");
 	phone = billing.get("phone");
 	company = billing.get("company");
-	address1 = billing.get("address_1");
-	city = billing.get("city");
-	state = billing.get("state");
-	postcode = billing.get("postcode");
-	country = billing.get("country");
 	orderId = orderData.get("id");
 	orderNumber = orderData.get("number");
 	orderTotal = orderData.get("total");
 	orderStatus = orderData.get("status");
 	currency = orderData.get("currency");
 	lineItems = orderData.get("line_items");
-	// Validate email
-	if(email == null || email.trim() == "")
-	{
-		debugOut.put("error","Email is missing — cannot create contact/lead");
-		return "{\"status\":\"error\",\"message\":\"Email is missing — cannot create contact/lead\",\"debug\":" + debugOut.toString() + "}";
-	}
-	// build product list & total quantity
+	info "Processing order: " + orderId + " | Number: " + orderNumber + " | Total: " + orderTotal;
 	productList = "";
 	totalQuantity = 0;
-	if(lineItems != null && lineItems.size() > 0)
+	if(lineItems != null)
 	{
 		for each  item in lineItems
 		{
 			productName = item.get("name");
 			quantity = item.get("quantity");
 			price = item.get("total");
-			try 
+			if(quantity != null)
 			{
-				if(quantity != null)
+				try 
 				{
 					totalQuantity = totalQuantity + quantity.toNumber();
 				}
+				catch (e)
+				{
+				}
 			}
-			catch (qEx)
-			{
-				debugOut.put("quantity_conversion_error",qEx.toString());
-			}
-			prodLine = "- " + productName + " (Qty: " + quantity + ", Price: " + price + " " + currency + ")" + "\n";
-			productList = productList + prodLine;
+			productList = productList + "- " + productName + " (Qty: " + quantity + ", Price: " + price + " " + currency + ")\n";
 		}
 	}
-	debugOut.put("order_summary",{"total_quantity":totalQuantity,"product_count":lineItems.size()});
-	// prepare contact payload
+	//Create or update contact if found
 	contactMap = Map();
 	contactMap.put("First_Name",firstName);
 	contactMap.put("Last_Name",lastName);
@@ -182,203 +106,144 @@ try
 	{
 		contactMap.put("Phone",phone);
 	}
-	if(address1 != null && address1 != "")
+	if(billing.get("address_1") != null && billing.get("address_1") != "")
 	{
-		contactMap.put("Mailing_Street",address1);
+		contactMap.put("Mailing_Street",billing.get("address_1"));
 	}
-	if(city != null && city != "")
+	if(billing.get("city") != null && billing.get("city") != "")
 	{
-		contactMap.put("Mailing_City",city);
+		contactMap.put("Mailing_City",billing.get("city"));
 	}
-	if(state != null && state != "")
+	if(billing.get("state") != null && billing.get("state") != "")
 	{
-		contactMap.put("Mailing_State",state);
+		contactMap.put("Mailing_State",billing.get("state"));
 	}
-	if(postcode != null && postcode != "")
+	if(billing.get("postcode") != null && billing.get("postcode") != "")
 	{
-		contactMap.put("Mailing_Zip",postcode);
+		contactMap.put("Mailing_Zip",billing.get("postcode"));
 	}
-	if(country != null && country != "")
+	if(billing.get("country") != null && billing.get("country") != "")
 	{
-		contactMap.put("Mailing_Country",country);
+		contactMap.put("Mailing_Country",billing.get("country"));
 	}
-	debugOut.put("contact_payload",contactMap);
-	// search for existing contact by email
+	// Search for existing contact
 	contactId = null;
-	searchResponse = null;
-	if(email != null && email != "")
+	try 
 	{
-		searchCriteria = "(Email:equals:" + email + ")";
-		debugOut.put("search_criteria",searchCriteria);
-		try 
+		searchResponse = zoho.crm.searchRecords("Contacts","(Email:equals:" + email + ")");
+		if(searchResponse != null)
 		{
-			searchResponse = zoho.crm.searchRecords("Contacts",searchCriteria);
-			debugOut.put("search_response_raw",searchResponse);
-		}
-		catch (sEx)
-		{
-			debugOut.put("search_exception",sEx.toString());
-			searchResponse = null;
-		}
-		// handle possible response structures
-		try 
-		{
-			if(searchResponse != null)
+			dataList = searchResponse.get("data");
+			if(dataList == null)
 			{
-				if(searchResponse.containsKey("data"))
-				{
-					dataList = searchResponse.get("data");
-					if(dataList != null && dataList.size() > 0)
-					{
-						existingContact = dataList.get(0);
-						contactId = existingContact.get("id");
-					}
-				}
-				else
-				{
-					if(searchResponse.size() > 0)
-					{
-						existingContact = searchResponse.get(0);
-						contactId = existingContact.get("id");
-					}
-				}
+				dataList = searchResponse;
+			}
+			if(dataList != null && dataList.size() > 0)
+			{
+				contactId = dataList.get(0).get("id");
 			}
 		}
-		catch (normEx)
-		{
-			debugOut.put("search_normalization_error",normEx.toString());
-		}
 	}
-	debugOut.put("contact_id_found",contactId);
-	updateResponse = null;
-	// if contact exists, attempt update
+	catch (e)
+	{
+		info "Contact search error: " + e.toString();
+	}
+	// Update or create contact
 	if(contactId != null)
 	{
 		try 
 		{
-			updateResponse = zoho.crm.updateRecord("Contacts",contactId,contactMap);
-			debugOut.put("update_contact_response",updateResponse);
+			zoho.crm.updateRecord("Contacts",contactId,contactMap);
+			info "Contact updated: " + contactId;
 		}
-		catch (uEx)
+		catch (e)
 		{
-			debugOut.put("update_contact_exception",uEx.toString());
+			info "Contact update error: " + e.toString();
 		}
 	}
-	createContactResponse = null;
-	// if no contactId found, create new contact
-	if(contactId == null)
+	else
 	{
 		try 
 		{
-			createContactResponse = zoho.crm.createRecord("Contacts",contactMap);
-			debugOut.put("create_contact_response",createContactResponse);
-			if(createContactResponse != null && createContactResponse.get("status") == "success")
+			createResponse = zoho.crm.createRecord("Contacts",contactMap);
+			if(createResponse != null && createResponse.get("status") == "success")
 			{
-				details = createContactResponse.get("details");
-				if(details != null && details.containsKey("id"))
-				{
-					contactId = details.get("id");
-					debugOut.put("contact_created_id",contactId);
-				}
-			}
-			else
-			{
-				debugOut.put("contact_creation_failed",createContactResponse);
+				contactId = createResponse.get("details").get("id");
+				info "Contact created: " + contactId;
 			}
 		}
-		catch (cEx)
+		catch (e)
 		{
-			debugOut.put("create_contact_exception",cEx.toString());
+			info "Contact create error: " + e.toString();
 		}
 	}
-	// prepare lead payload
+	// DEAL CREATION
+	companyName = company;
+	if(companyName == null || companyName == "")
+	{
+		companyName = firstName + " " + lastName;
+	}
+	if(companyName == null || companyName.trim() == "")
+	{
+		companyName = "WooCommerce";
+	}
+	description = "WooCommerce Order #" + orderNumber + " (ID: " + orderId + ")\n";
+	description = description + "Order Status: " + orderStatus + "\n";
+	description = description + "Total Amount: " + orderTotal + " " + currency + "\n";
+	description = description + "Total Items: " + totalQuantity + "\n\n";
+	description = description + "Products Ordered:\n" + productList;
 	leadMap = Map();
 	leadMap.put("First_Name",firstName);
 	leadMap.put("Last_Name",lastName);
 	leadMap.put("Email",email);
+	leadMap.put("Company",companyName);
+	leadMap.put("Lead_Source","WooCommerce");
+	leadMap.put("Lead_Status","Not Contacted");
+	leadMap.put("Description",description);
 	if(phone != null && phone != "")
 	{
 		leadMap.put("Phone",phone);
 	}
-	companyName = company;
-	if(companyName == null || companyName == "")
-	{
-		if(firstName != null && lastName != null)
-		{
-			companyName = firstName + " " + lastName;
-		}
-		else
-		{
-			companyName = "WooCommerce Customer";
-		}
-	}
-	leadMap.put("Company",companyName);
-	leadMap.put("Lead_Source","WooCommerce");
-	leadMap.put("Lead_Status","Not Contacted");
-	// build description
-	description = "WooCommerce Order #" + orderNumber + " (ID: " + orderId + ")" + "\n";
-	description = description + "Order Status: " + orderStatus + "\n";
-	description = description + "Total Amount: " + orderTotal + " " + currency + "\n";
-	description = description + "Total Items: " + totalQuantity + "\n" + "\n";
-	description = description + "Products Ordered:" + "\n" + productList;
-	leadMap.put("Description",description);
 	if(orderTotal != null)
 	{
 		try 
 		{
 			leadMap.put("Annual_Revenue",orderTotal.toDecimal());
 		}
-		catch (convEx)
+		catch (e)
 		{
-			debugOut.put("annual_revenue_conversion_error",convEx.toString());
 		}
 	}
-	debugOut.put("lead_payload",leadMap);
-	// create lead
-	leadResponse = null;
 	leadId = null;
 	try 
 	{
 		leadResponse = zoho.crm.createRecord("Leads",leadMap);
-		debugOut.put("create_lead_response",leadResponse);
 		if(leadResponse != null && leadResponse.get("status") == "success")
 		{
-			leadDetails = leadResponse.get("details");
-			if(leadDetails != null && leadDetails.containsKey("id"))
-			{
-				leadId = leadDetails.get("id");
-				debugOut.put("lead_created_id",leadId);
-			}
-		}
-		else
-		{
-			debugOut.put("lead_creation_failed",leadResponse);
+			leadId = leadResponse.get("details").get("id");
+			info "Lead created: " + leadId;
 		}
 	}
-	catch (leadEx)
+	catch (e)
 	{
-		debugOut.put("create_lead_exception",leadEx.toString());
+		info "Lead create error: " + e.toString();
 	}
-	// final summary
-	finalSummary = Map();
-	finalSummary.put("status","success");
-	finalSummary.put("contact_id",contactId);
-	finalSummary.put("lead_id",leadId);
-	finalSummary.put("order_id",orderId);
-	finalSummary.put("order_number",orderNumber);
-	finalSummary.put("debug",debugOut);
-	info finalSummary;
-	return finalSummary.toString();
+	finalResult = Map();
+	finalResult.put("status","success");
+	finalResult.put("contact_id",contactId);
+	finalResult.put("lead_id",leadId);
+	finalResult.put("order_id",orderId);
+	finalResult.put("order_number",orderNumber);
+	info finalResult;
+	return finalResult;
 }
 catch (ex)
 {
-	debugOut.put("final_error",ex.toString());
-	errorMap = Map();
-	errorMap.put("status","error");
-	errorMap.put("message",ex.toString());
-    info errorMap ;
-	return errorMap.toString();
+	errorResult = Map();
+	errorResult.put("status","error");
+	errorResult.put("message",ex.toString());
+	info errorResult;
+	return errorResult;
 }
-info debugOut.toString();
-return "Integration ends";
+return "Integration completed";
 }
